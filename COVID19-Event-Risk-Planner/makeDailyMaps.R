@@ -1,18 +1,3 @@
-library(dplyr)
-library(ggplot2)
-library(ggpubr)
-library(ggrepel)
-library(ggthemes)
-library(jsonlite)
-library(leaflet)
-library(leaflet.extras)
-library(lubridate)
-library(mapview)
-library(matlab)
-library(RCurl)
-library(rtweet)
-library(sf)
-library(withr)
 #Sys.setenv(PATH = with_path('/projects/covid19/bin', Sys.getenv("PATH")))
 
 
@@ -48,22 +33,6 @@ getData <- function() {
   legendlabs <<- c("< 1", " 1-25", "25-50", "50-75", "75-99", "> 99" , "No or missing data")
 }
 
-# Create mouse-over labels
-maplabs <- function(riskData) {
-  riskData <- riskData %>%
-    mutate(risk = case_when(
-      risk == 100 ~ '> 99',
-      risk < 1 ~ '< 1',
-      is.na(risk) ~ 'No data',
-      TRUE ~ as.character(risk)
-    ))
-  labels <- paste0(
-    "<strong>", paste0(riskData$NAME, ", ", riskData$stname), "</strong><br/>",
-    "Current Risk Level: <b>",riskData$risk, ifelse(riskData$risk == "No data", "", " &#37;"),"</b>"
-  ) %>% lapply(htmltools::HTML)
-  return(labels)
-}
-
 
 
 # Calculate risk
@@ -74,102 +43,6 @@ calc_risk <- function(I, g, pop) {
 }
 
 
-######## create and save daily map widgets ########
-event_size <<- c(10, 25, 50, 100, 500, 1000, 5000, 10000)
-#event_size = c(50)
-asc_bias_list <<- c(5, 10)
-
 getData()
 
 
-for ( asc_bias in asc_bias_list ){
-  
-  data_Nr <- data_join %>%
-    mutate(Nr = (cases - cases_past) * asc_bias)
-  
-  if (dim(data_Nr)[1] > 2000){
-    dir.create(file.path('daily_risk_map', current_time), recursive = T)
-    
-    maps = list()
-    for ( size in event_size ){
-      
-      # riskdt_map <-  data_Nr %>%  
-      #     mutate(risk = if_else(Nr > 0, round(calc_risk(Nr, size, pop)), 0)) %>%
-      #     right_join(county, by = c("fips" = "GEOID"))
-      riskdt <- data_Nr %>% 
-        mutate(risk = if_else(Nr > 10, round(calc_risk(Nr, size, pop)), 0))
-      
-      riskdt_map <- county %>% left_join(riskdt, by = c("GEOID" = "fips"))
-      
-      map <- leaflet() %>%
-        addProviderTiles(providers$CartoDB.Positron) %>%
-        setView(lat = 37.1, lng = -95.7, zoom = 4) %>%
-        addPolygons(
-          data = riskdt_map,
-          color = "#444444", weight = 0.2, smoothFactor = 0.1,
-          opacity = 1.0, fillOpacity = 0.5,
-          fillColor = ~ pal(risk),
-          highlight = highlightOptions(weight = 1),
-          label = maplabs(riskdt_map)
-        ) %>%
-        addPolygons(
-          data = stateline,
-          fill = FALSE, color = "#943b29", weight = 1, smoothFactor = 0.5,
-          opacity = 1.0) %>%
-        addLegend(
-          data = riskdt_map,
-          position = "topright", pal = pal, values = ~risk,
-          title = "Risk Level (%)",
-          opacity = 1,
-          labFormat = function(type, cuts, p) {
-            paste0(legendlabs)
-          }) 
-      maps[[size]] = map
-      maps[[size]]$dependencies[[1]]$src[1] = "/srv/shiny-server/map_data/"
-      mapshot(map, url = file.path('/srv/shiny-server/www', paste0(asc_bias,'_', size,'.html')))
-    } 
-    
-    saveRDS(object = maps, file = file.path('daily_risk_map', current_time, paste0('riskmaps_',asc_bias,'.rds')))
-    saveRDS(object = maps, file = file.path('daily_risk_map', paste0('riskmaps_',asc_bias,'.rds')))
-    print(file.path('/srv/shiny-server/daily_risk_map', current_time, 'asc_10_size_100.png'))
-    
-    
-  }
-if (asc_bias == 10 & args[2] == "1" ){
-	for (size in c(25,50)){
-  riskdt <- data_Nr %>%
-    mutate(risk = if_else(Nr > 10, round(calc_risk(Nr, size, pop)), 0))
-  
-  riskdt_map <- county %>% left_join(riskdt, by = c("GEOID" = "fips"))
-  
-  map <- leaflet() %>%
-    addProviderTiles(providers$CartoDB.Positron) %>%
-    setView(lat = 37.1, lng = -95.7, zoom = 4) %>%
-    addPolygons(
-      data = riskdt_map,
-      color = "#444444", weight = 0.2, smoothFactor = 0.1,
-      opacity = 1.0, fillOpacity = 1.0,
-      fillColor = ~ pal(risk),
-      highlight = highlightOptions(weight = 1),
-      label = maplabs(riskdt_map)
-    ) %>%
-    addPolygons(
-      data = stateline,
-      fill = FALSE, color = "#943b29", weight = 1, smoothFactor = 0.5,
-      opacity = 1.0) %>%
-    addLegend(
-      data = riskdt_map,
-      position = "topright", pal = pal, values = ~risk,
-      title = "Risk Level (%)",
-      opacity = 1,
-      labFormat = function(type, cuts, p) {
-        paste0(legendlabs)
-      })
-  
-  map$dependencies[[1]]$src[1] = "/srv/shiny-server/map_data/"
- print("Map to png" )
- mapshot(map, file = file.path('/srv/shiny-server/daily_risk_map', current_time, paste0('asc_10_size_',size,'.png')))
- post_tweet(status=paste0("County-level risk estimate update for ", ymd_hms(current_time), ".  Estimated risk that at least 1 person is #COVID19 positive for events or other areas where ",size," individuals are in close contact [Assuming 10:1 ascertainment bias]"), media=file.path('daily_risk_map', current_time, paste0('asc_10_size_',size,'.png')))
- #print(paste0("County-level risk estimate update for ", ymd_hms(current_time), ".  Estimated risk that at least 1 person is #COVID19 positive for events or other areas where " ,size,  " individuals are in close contact. [Assuming 10:1 ascertainment bias]"))
-}}
-}
