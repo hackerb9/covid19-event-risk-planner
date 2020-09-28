@@ -1,6 +1,6 @@
 #!/bin/bash
 #set -x
-base="/srv/shiny-server/"
+base="."
 fname=$(date +%Y%m%d_%H%M%S) 
 wget https://covidtracking.com/api/v1/states/current.csv \
 	-O "${base}/states_current/${fname}.csv" \
